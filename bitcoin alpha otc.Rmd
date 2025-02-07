@@ -1,0 +1,1467 @@
+---
+title: "Bitcoin alpha otc"
+author: "Marinato Federico"
+date: "2025-01-12"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## BITCOIN OTC
+
+Bitcoin OTC (Over-The-Counter) è una piattaforma di scambio peer-to-peer che consente agli utenti di effettuare transazioni Bitcoin senza passare attraverso exchange centralizzati. Essendo uno spazio di scambio anonimo, esiste il rischio di truffe, per cui gli utenti hanno la possibilità di valutare la fiducia reciproca attraverso un sistema di rating.
+
+Il grafo di Bitcoin OTC è una rete diretta e pesata con segni, dove:
+I nodi rappresentano gli utenti che scambiano Bitcoin.
+Gli archi indicano una valutazione di fiducia o sfiducia tra utenti.
+I pesi degli archi (RATINGRATING) vanno da -10 (massima sfiducia) a +10 (massima fiducia), con incrementi di 1.
+Il timestamp (TIMETIME) indica il momento in cui è stata data la valutazione.
+
+## BITCOIN ALPHA
+Bitcoin Alpha è un'altra piattaforma di scambio peer-to-peer basata su Bitcoin, simile a Bitcoin OTC, con la stessa necessità di valutare l'affidabilità degli utenti.
+
+La differenza principale rispetto a Bitcoin OTC è che Bitcoin Alpha è il primo dataset esplicitamente modellato come una rete diretta, pesata e con segni.
+
+## CODICE
+
+```{r}
+#LIBRERIE
+library(igraph)
+library(ggraph)
+library(ggplot2)
+library(poweRlaw)
+library(tidyverse)
+library(tidygraph)
+library(signnet)
+library(visNetwork)
+library(proxy)
+library(lsa)
+library(dplyr)
+library(gganimate)
+library(gifski)
+```
+
+```{r cars}
+# Caricamento dei dataset
+BTC_alpha_path = "C:/Users/User/Desktop/federico/scuola/laurea magistrale/advance data science/esame/dataset/bitcoin/soc-sign-bitcoinalpha.csv"
+BTC_otc_path = "C:/Users/User/Desktop/federico/scuola/laurea magistrale/advance data science/esame/dataset/bitcoin/soc-sign-bitcoinotc.csv"
+```
+
+## PREPARAZIONE DEL DATASET
+
+Carichiamo i file csv come Dataframe
+```{r}
+# Lettura dei file
+df_alpha = read.csv(BTC_alpha_path, header = FALSE, sep = ",", col.names = c("Sorgente", "Destinazione", "Peso", "TimeStamp"))
+
+df_otc = read.csv(BTC_otc_path, header = FALSE, sep = ",", col.names = c("Sorgente", "Destinazione", "Peso", "TimeStamp"))
+```
+
+Trasformiamo la colonna TimeStamp in un formato data leggibile
+```{r}
+# Trasformzione in daterime il campo timestamp specificando che il tempo parte dall'Epoch UNIX
+df_otc$TimeStamp <- as.POSIXct(df_otc$TimeStamp, origin="1970-01-01", tz="UTC")
+df_otc
+
+df_alpha$TimeStamp <- as.POSIXct(df_alpha$TimeStamp, origin="1970-01-01", tz="UTC")
+df_alpha
+```
+
+```{r}
+str(df_otc)
+```
+
+Riassunto colonna peso 
+Commenti alpha:
+-10.000   1.000   1.000   1.464   2.000  10.000 
+Commenti otc:
+-10.000   1.000   1.000   1.012   2.000  10.000 
+```{r}
+summary(df_alpha$Peso)
+summary(df_otc$Peso)
+
+hist(df_alpha$Peso, breaks=20, col="skyblue", main="Distribuzione delle Valutazioni Alpha", xlab="Rating", ylab="Frequenza")
+hist(df_otc$Peso, breaks=20, col="skyblue", main="Distribuzione delle Valutazioni OTC", xlab="Rating", ylab="Frequenza")
+
+ggplot(df_otc, aes(x = Peso)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "black", alpha = 0.7) +
+  labs(title = "Distribuzione delle valutazioni di fiducia in Bitcoin Alpha", 
+       x = "Rating", y = "Frequenza",
+       subtitle = "Valutazione nella maggioranza di casi positiva (+1) ",
+       caption = "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-alpha.html") +
+  theme_classic() +
+  theme(plot.title = element_text(color = "black", size = 12, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(color = "darkblue", hjust = 0.5),
+        plot.caption = element_text(color = "black", face = "italic"),
+        axis.title = element_text(color = "darkblue"),
+        axis.line = element_line(colour = "black", linewidth = 0.8))
+
+```
+
+## ANALISI LOCALE
+
+Costruzione del grafo e rilevazione numero nodi ed archi
+```{r}
+# Creazione del grafo da edge list
+g_alpha <- graph_from_data_frame(df_alpha, directed = TRUE)
+
+# Aggiungi il peso agli archi
+E(g_alpha)$Peso <- df_alpha$Peso
+
+# Rimuovi gli archi con peso NaN
+g_alpha <- delete_edges(g_alpha, E(g_alpha)[is.nan(E(g_alpha)$Peso)])
+
+# Creazione del grafo da edge list
+g_otc <- graph_from_data_frame(df_otc, directed = TRUE)
+
+# Aggiungi il peso agli archi
+E(g_otc)$Peso <- df_otc$Peso
+
+# Rimuovi gli archi con peso NaN
+g_otc <- delete_edges(g_otc, E(g_otc)[is.nan(E(g_otc)$Peso)])
+
+# Visualizza alcune proprietà del grafo
+summary(g_alpha)
+summary(g_otc)
+
+```
+Misure di centralita'
+```{r}
+centralita = function(g){
+  #Centralità di grado
+  degree_IN = degree(g, mode = "in")    #Per misurare quanto un nodo è valutato
+  degree_OUT = degree(g, mode = "out")  #Per vedere chi dà più valutazioni
+  
+  #Centralita' di intermediazione (Betweenness)
+  betweenness = betweenness(g, directed = TRUE)       #Per scoprire chi collega diverse parti della rete.
+  
+  #Centralità di prossimità (Closeness)
+  closeness = closeness(g, mode="out")
+  
+  #PageRank
+  pagerank = page_rank(g)$vector        #Per identificare utenti con valutazioni da persone influenti
+  
+  #Costruzione Dataframe
+  df_centralita <- data.frame(
+    Nodo = V(g)$name,
+    Degree_In = degree_IN,
+    Degree_Out = degree_OUT,
+    Betweenness = betweenness,
+    Closeness = closeness,
+    PageRank = pagerank
+  )
+  
+  return(df_centralita)
+}
+```
+
+```{r}
+df_centrality_alpha = centralita(g_alpha)
+df_centrality_otc = centralita(g_otc)
+```
+
+```{r}
+df_centrality_alpha
+df_centrality_otc
+```
+Dato che siamo all'interno di una rete Bitcoin dove le transazioni vengono scambiate direttamente senza intermediari le misure di centralita' quali betweenness e closness vengono al momento non considerate.
+
+## DOMANDE ANALISI LOCALE
+
+Quali nodi sono i piu' valutati all'interno della rete?
+Commento Alpha:
+1-3-2-4 con una differenza di ben 147 voti tra il primo e il terzo
+Commento OTC:
+35-2642-1810 con una differenza di ben 224 voti tra il primo e il terzo
+ 
+```{r}
+df_centrality_alpha = df_centrality_alpha[order(-df_centrality_alpha$Degree_In), ]
+head(df_centrality_alpha,10)
+
+df_centrality_otc = df_centrality_otc[order(-df_centrality_otc$Degree_In), ]
+head(df_centrality_otc,10)
+
+```
+Quali nodi danno piu' valutazioni all'interno della rete?
+Commento Alpha:
+1-8-3-4 dove prima il numero 8 non era nemmeno tra i primi 10, il numero 2 scende al 9 posto.
+Commento OTC:
+35-2642-1810 con una differenza di ben 359 voti tra il primo e il terzo
+```{r}
+df_centrality_alpha = df_centrality_alpha[order(-df_centrality_alpha$Degree_Out), ]
+head(df_centrality_alpha,10)
+
+df_centrality_otc = df_centrality_otc[order(-df_centrality_otc$Degree_Out), ]
+head(df_centrality_otc,10)
+```
+Quali sono i nodi piu' influenti (pagerank)?
+Commento Alpha:
+1-3-4-2 switch tra posizione 4 e 2. il primo nodo avendo molti nodi in ingresso ha un valore molto alto
+Commento OTC:
+35-2642-1810 con una differenza sostanziale tra il primo e il terzo
+```{r}
+df_centrality_alpha = df_centrality_alpha[order(-df_centrality_alpha$PageRank), ]
+head(df_centrality_alpha,10)
+
+df_centrality_otc = df_centrality_otc[order(-df_centrality_otc$PageRank), ]
+head(df_centrality_otc,10)
+```
+Come varia la distribuzione dei gradi in entrata e uscita per le due reti?
+Commenti:
+Si ha una distribuzione dei gradi a coda lunga per entrambe le reti sia per i nodi in entrata che in uscita.
+Si nota come i nodi in entrata siano maggiori per grado basso su entrambe le reti 
+Interessante vedere i valori di summary dove le medie dei gradi di entrata sono uguali a quelle di uscita sebbene i valori minimi e massimi siano diversi, come se ci fosse un bilanciamento nascosto. Avviene questa cosa per entrambe le reti.
+```{r}
+plot_distributione_gradi <- function(Degree_In, Degree_Out, titolo="Distribuzione dei Gradi") {
+
+  # Creazione dataframe
+  df_degree <- data.frame(
+    Degree = c(Degree_In, Degree_Out),
+    Type = rep(c("In-Degree", "Out-Degree"), each=length(Degree_In))  
+  )
+  
+  # Plot della distribuzione dei gradi in scala logaritmica
+  ggplot(df_degree, aes(x=Degree, fill=Type)) +
+    geom_histogram(bins=50, alpha=0.6, position="dodge") +
+    scale_y_continuous(expand = c(0, 0), limits = c(0,2500)) + 
+    scale_fill_manual(
+        name = "Tipo di grado", 
+        values = c("In-Degree" = "blue", "Out-Degree" = "red"), 
+        labels = c("In-Degree" = "Grado entrante", "Out-Degree" = "Grado uscente")
+    )+
+    scale_x_log10() +  # Scala logaritmica per visualizzare meglio la coda
+    labs(title=titolo, x="Grado", y="Frequenza", 
+         subtitle = "Distribuzione a coda lunga dei nodi",
+         caption = "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-otc.html") +
+    theme_classic() +
+    theme(plot.title = element_text(color = "black", size = 12, face = "bold",hjust = 0.5),
+          plot.subtitle = element_text(color = "darkblue",hjust = 0.5),
+          plot.caption = element_text(color = "black", face = "italic"),
+          axis.title = element_text(color = "darkblue"),
+          legend.title = element_text(face = "bold"))
+}
+
+# Plottiamo la distribuzione per Bitcoin Alpha e Bitcoin OTC
+plot_distributione_gradi(df_centrality_alpha$Degree_In, df_centrality_alpha$Degree_Out, "Distribuzione dei Gradi - Bitcoin Alpha")
+plot_distributione_gradi(df_centrality_otc$Degree_In, df_centrality_otc$Degree_Out, "Distribuzione dei Gradi - Bitcoin OTC")
+
+summary(df_centrality_alpha$Degree_In)
+summary(df_centrality_alpha$Degree_Out)
+
+summary(df_centrality_otc$Degree_In)
+summary(df_centrality_otc$Degree_Out)
+```
+Analizziamo se distribuzione dei gradi e' a power-law tramite stima del valore di alpha e fit di modello poisson,normale e power-law per determinare la migliore distribuzione. Uso della libreria powerLaw
+Commenti:
+La distribuzione per entrambe le reti alpha e otc e' meglio rappresentata da una power-law anche se le code delle distribuzioni iniziano a distaccarsene.
+Un valore alpha pari a 2,22 (bitcoin alpha) e 2,12 (bitcoin otc) sono stati trovati dunque tra 2 e 3. Confermiamo la presenza di hub ovvero utenti con molte connessioni.
+Sicuramente non si ha una rete casuale dato che la distribuzione dei gradi non segue una legge Poisson.
+```{r}
+verifica_power_law <- function(g, modalita,titolo) {
+  # Calcolo del grado in entrata
+  degree_values <- degree(g, mode=modalita)
+  # Rimuovere i nodi con grado 0
+  degree_values <- degree_values[degree_values != 0]
+  
+  # Creazione modello di legge di potenza
+  pl_model <- displ$new(degree_values)
+  
+  # Stima del parametro alpha
+  est <- estimate_xmin(pl_model)
+  pl_model$setXmin(est)
+  
+  # Stampa del valore di alpha stimato
+  cat("Stima dell'esponente alpha:", est$pars, "\n")
+  
+  # Confronto con distribuzioni alternative
+  #gof <- bootstrap_p(pl_model, no_of_sims=50)
+  #cat("p-value del test di Goodness-of-Fit:", gof$p, "\n")
+  
+  #fit distribuzione normale
+  m_ln = dislnorm$new(degree_values)
+  est_ln = estimate_xmin(m_ln)
+  m_ln$setXmin(est_ln)
+  
+  #fit distribuzione poisson
+  m_pois = dispois$new(degree_values)
+  est_p = estimate_xmin(m_pois)
+  m_pois$setXmin(est_p)
+  
+  plot(pl_model, pch = 21, bg = 2, panel.first = grid(col = "grey80"),
+  xlab = "Grado", ylab = "CCDF", main = titolo, sub =  "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-alpha.html")
+  lines(pl_model, col = "green", lwd = 3) #linea verde power-law fittata
+  lines(m_ln, col = "orange", lwd = 3) #linea rossa modello lineare fittato
+  lines(m_pois, col="purple", lwd=3) #linea blu modello poisson fittato
+  legend("topright", title="Modelli fittati", 
+    c("Power-law","Lineare","Poisson"), fill= c("green","orange","purple"), horiz=FALSE)
+  
+  return(c(pl_model,m_ln,m_pois))
+}
+
+# Eseguiamo il test su entrambe le reti
+verifica_power_law(g_alpha,"in","Fitting distribuzione power-law gradi in entrata Bitcoin Alpha")
+verifica_power_law(g_alpha,"out","Fitting distribuzione power-law gradi in uscita Bitcoin Alpha")
+
+verifica_power_law(g_otc,"in","Fitting distribuzione power-law gradi in entrata Bitcoin OTC")
+verifica_power_law(g_otc,"out","Fitting distribuzione power-law gradi in uscita Bitcoin OTC")
+
+```
+2.	Esistono utenti che ricevono molti giudizi negativi (utenti molto sfidati dalla rete)?
+Commenti:
+Sappiamo che esistono utenti con valutazioni negative (istogramma inizio analisi).
+Abbiamo in alpha 1536 archi con valutazioni negative su un totale di 24,186 nodi ~ 6,35%.
+Abbiamo in otc 3,563 archi con valutazioni negative su un totale di35592 nodi ~ 10%.
+Gli utenti con piu' valutazioni negative in bitcoin alpha sono:
+7604 con 69 valutazioni negative
+177 con 42
+7603 con 41
+Gli utenti con piu' valutazioni negative in bitcoin OTC sono:
+3744 con 75 valutazioni negative
+1383	 con 45
+2028 con 45
+La coda delle distribuzioni delle valutazionoi negative è lunga, significa che pochi utenti ricevono la maggior parte delle sfiducie.
+```{r}
+valutazioni_negative= function(df,titolo,subtitolo){
+  # Filtriamo solo gli archi con rating negativo
+  rating_negativo = filter(df, Peso < 0)
+
+  # Raggruppiamo il rating negativo per ogni nodo di Destinazione
+  rating_destinzione = rating_negativo %>%
+    group_by(Destinazione) %>%
+    summarise(Num_Negative_Ratings = n()) %>% #Conta quanti giudizi negativi ha ricevuto ogni utente
+    arrange(desc(Num_Negative_Ratings))
+  
+  # Istogramma della distribuzione dei giudizi negativi ricevuti
+  ggplot(rating_destinzione, aes(x=Num_Negative_Ratings)) +
+    geom_histogram(bins=30, fill="orange",color = "black", alpha = 0.7 ) +
+    scale_y_continuous(expand = c(0.01,0)) + 
+    scale_x_log10() +  # Usiamo scala logaritmica per evidenziare gli outlier
+    labs(title=titolo,
+         caption = subtitolo,
+         subtitle = "Pochi utenti ricevono la maggior parte delle sfiducie",
+         x="Numero di Giudizi Negativi Ricevuti",
+         y="Frequenza") +
+    theme_classic()+
+    theme(plot.title = element_text(color = "black", size = 12, face = "bold",hjust = 0.5),
+          plot.subtitle = element_text(color = "darkblue",hjust = 0.5),
+          plot.caption = element_text(color = "black", face = "italic"),
+          axis.title = element_text(color = "darkblue"))
+}
+sorgente_dati_alpha = "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-alpha.html"
+sorgente_dati_otc = "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-otc.html"
+valutazioni_negative(df_alpha,"Distribuzione dei giudizi negativi RICEVUTI - Bitcoin Alpha",sorgente_dati_alpha )
+valutazioni_negative(df_otc,"Distribuzione dei giudizi negativi RICEVUTI - Bitcoin OTC" ,sorgente_dati_otc)
+
+```
+
+Quali sono i nodi che danno valutazioni piu' negative in termini di quantita' e di occorrenza?
+Commenti:
+Ricerca di nodi che distribuiscono più sfiducia, pensare se rappresentano nodi tossici o no nella rete.
+
+```{r}
+tossicita = function(df,titolo,subtitolo,titolo2){  
+rating_negativo = filter(df, Peso < 0)
+
+  # Numero di valutazioni negative date da ciascun utente
+  rating_destinzione = rating_negativo %>%
+    group_by(Sorgente) %>%
+    summarise(Numero_negativi_dati = n()) %>% #Conta quanti giudizi negativi ha valutato
+    arrange(desc(Numero_negativi_dati))
+  
+  # 3. Numero di valutazioni negative ricevute da ciascun utente
+  rating_ricevuto <- rating_negativo %>%
+    group_by(Destinazione) %>%
+    summarise(Numero_negativi_ricevuti = n()) %>%
+    arrange(desc(Numero_negativi_ricevuti))
+
+  cat("Top 10 utenti che danno più voti negativi:\n")
+  print(head(rating_destinzione, 10))
+  
+  # Sommiamo il totale dei rating negativi assegnati (valutazioni più pesanti)
+  somma_valutazioni_negative <- rating_negativo %>%
+    group_by(Sorgente) %>%
+    summarise(valutazioni_Negative_pesate = sum(Peso)) %>%
+    arrange(valutazioni_Negative_pesate)  # Ordinato dal più pesante (valori negativi più bassi)
+  
+  cat("Top 10 utenti che in totale le loro valutazioni negative risultano più pesanti:\n")
+  print(head(somma_valutazioni_negative, 10))
+  
+  # 2. Media dei voti negativi dati da ciascun utente
+  media_valutazioni_negative <- rating_negativo %>%
+    group_by(Sorgente) %>%
+    summarise(media_valutazioni = mean(Peso)) %>%
+    arrange(media_valutazioni)  # Ordinato per severità (valori più bassi)
+
+  
+  # Istogramma della distribuzione dei giudizi negativi dati
+plot1 = ggplot(rating_destinzione, aes(x=Numero_negativi_dati)) +
+  geom_histogram(bins=30, fill="orange", color="black", alpha=0.7) +
+  scale_x_log10() +  # Usiamo scala logaritmica per evidenziare gli outlier
+  scale_y_continuous(expand = c(0.01,0)) + 
+  labs(title= titolo,
+       caption = subtitolo,
+       subtitle = "Pochi utenti esprimono molti giudizi negativi",
+       x="Numero di Giudizi Negativi Dati",
+       y="Frequenza") +
+  theme_classic()+
+    theme(plot.title = element_text(color = "black", size = 12, face = "bold",hjust = 0.5),
+          plot.subtitle = element_text(color = "darkblue",hjust = 0.5),
+          plot.caption = element_text(color = "black", face = "italic"),
+          axis.title = element_text(color = "darkblue"))
+
+print(plot1)
+
+# Istogramma della distribuzione del peso dei rating negativi dati
+plot2 = ggplot(somma_valutazioni_negative, aes(x=abs(valutazioni_Negative_pesate))) +
+  geom_histogram(bins=30, fill="skyblue",color="black", alpha=0.7) +
+  scale_y_continuous(expand = c(0.01,0)) + 
+  scale_x_log10(labels = function(x) -x) +  # Rende le etichette negative
+  labs(title = titolo2,
+       caption = subtitolo,
+       subtitle = "La somma delle valutazioni negative espressa da ogni nodo e' -10",
+       x="Somma dei Rating Negativi Espressi",
+       y="Frequenza") +
+  theme_classic()+
+    theme(plot.title = element_text(color = "black", size = 12, face = "bold",hjust = 0.5),
+          plot.subtitle = element_text(color = "darkblue",hjust = 0.5),
+          plot.caption = element_text(color = "black", face = "italic"),
+          axis.title = element_text(color = "darkblue"))
+
+print(plot2)
+
+#Correlazione
+
+# Dataframe con Confronto tra chi dà e chi riceve più voti negativi
+compare_neg <- merge(rating_destinzione, rating_ricevuto, by.x="Sorgente", by.y="Destinazione", all=TRUE)
+compare_neg[is.na(compare_neg)] <- 0  # Sostituiamo i NA con 0 (alcuni nodi potrebbero non essere in entrambi i gruppi)
+
+# Aggiungiamo la media delle valutazioni negative
+compare_neg <- merge(compare_neg, media_valutazioni_negative, by="Sorgente", all=TRUE)
+compare_neg[is.na(compare_neg)] <- 0
+
+# Calcoliamo la correlazione tra chi dà e chi riceve voti negativi
+cor_value <- cor(compare_neg$Numero_negativi_dati, compare_neg$Numero_negativi_ricevuti)
+cat("Correlazione tra chi dà e chi riceve voti negativi:", cor_value, "\n")
+
+}
+
+```
+
+Nella rete alpha i nodi che danno piu' recensioni negative sono:
+8 con 136 valutazioni date e 0 ricevute
+5342 con 52 valutazioni date e 6 ricevute
+15 con 45 valutazioni date e 10 ricevute
+Considerando la somma di pesi negativi assegnati nel grafo abbiamo il seguente podio:
+5	con -397 pesi negativi dati			
+7	con -320			
+5342 con -297
+8 con -271
+Emerge quindi come nel caso del nodo 8 alcuni nodi danno recensioni negative ma non elevate. Calcoliamo quindi la media per verificare quanto un nodo da valutazioni pesanti(Se sommiamo direttamente i rating negativi, diamo più importanza a chi assegna tanti voti negativi, anche se sono solo di -1).
+Dai risultati notiamo come le medie per i 4 nodi siano le seguenti:
+5 con -9.022727	
+7 con -8.000000	
+5342 con -5.711538
+8 con -1.992647
+```{r}
+tossicita(df_alpha, "Distribuzione dei Giudizi Negativi DATI - Bitcoin Alpha",sorgente_dati_alpha, "Distribuzione somma dei Giudizi Negativi DATI - Bitcoin Alpha")
+```
+
+
+Nella rete OTC i nodi che danno piu' recensioni negative sono:
+2125 con 227 valutazioni
+1810 con 160
+2266 con 98 valutazioni
+Considerando la somma di pesi negativi assegnati nel grafo abbiamo il seguente podio:
+1810	con -1403 pesi negativi dati			
+2125	con -1243			
+2067 con -668
+2266 con -604
+Dai risultati notiamo come le medie per i 4 nodi siano le seguenti:
+1810	con -8.76875				
+2125	con -5.475771			
+2067 con -8.564103	
+2266 con -6.163265
+```{r}
+tossicita(df_otc, "Distribuzione dei Giudizi Negativi DATI - Bitcoin OTC",sorgente_dati_otc, "Distribuzione somma dei Giudizi Negativi DATI - Bitcoin OTC")
+```
+
+Calcolare la correlazione tra severità e numero di valutazioni ricevute → per vedere se gli utenti sfidati sono anche quelli che danno più giudizi negativi.
+Commenti:
+Possiamo affermare per valori di 0,16 e di 0,22 che non c'e' una correlazione se non minima implicando che Chi riceve voti negativi non è necessariamente chi li assegna.
+
+Avendo una bassa correlazione possiamo chiederci se le valutazioni negative sono mirate oppure casuali.
+Commenti:
+Le valutazioni non sono casuali ma mirate perche' guardando il grafico pochi utenti ricevono molti voti negativi e la distribuzione e' molto sbilanciata.
+
+## ANALISI BILANCIAMENTO INDIRETTO
+
+1.La rete e' bilanciata?
+2.Qual è il suo grado di bilanciamento?
+3.Come cambia la centralità (Degree & PageRank) considerando i segni?
+
+Per lavorare con la libreria signet dobbiamo normalizzare i pesi tra [-1,1].
+La normalizzazione sembra corretta sia del punto grafico (stessa distribuzione) sia dai dati del dataframe
+```{r}
+# Creiamo una nuova colonna con i pesi normalizzati
+df_alpha$Peso_normalizzato <- df_alpha$Peso / 10
+df_otc$Peso_normalizzato <- df_otc$Peso / 10
+
+# Controlliamo che la trasformazione sia corretta
+summary(df_alpha$Peso_normalizzato)
+
+# Verifichiamo i primi valori normalizzati
+head(df_alpha[, c("Peso", "Peso_normalizzato")])
+
+hist(df_alpha$Peso_normalizzato, breaks=20, col="skyblue", main="Distribuzione delle Valutazioni Alpha", xlab="Rating", ylab="Frequenza")
+hist(df_otc$Peso_normalizzato, breaks=20, col="skyblue", main="Distribuzione delle Valutazioni OTC", xlab="Rating", ylab="Frequenza")
+```
+
+Creiamo un grafo con segno usabile per la libreria signnet. Trasformiamo il grafo in un grafo INDIRETTO pk la libreria non supporta i grafi diretti e verrebbe meno la considerazione del bilanciamento in casi come x amico di y ma y non amico di x.
+In questo modo si ha della perdita di informazione ma effettuiamo lo stesso la considerazione.
+Formula per il peso su arco indiretto:
+$$
+  peso\_aggregato=\frac{peso(x→y)+peso(y→x)}{2}
+$$
+Piu' avanti esprimiamo un ulteriore metodo di bilanciamento su una comunita' specifica dove si tiene in considerazione anche il bilanciamento locale di un nodo.
+
+```{r}
+creazione_grafo_firmato = function(df,diretto){
+  # Creiamo il grafo firmato
+  g_signed <- graph_from_edgelist_signed(as.matrix(df[, c("Sorgente", "Destinazione")]), 
+                                       signs = sign(df$Peso_normalizzato), 
+                                       directed = diretto)
+  
+  E(g_signed)$weight <- df$Peso_normalizzato
+
+  return (g_signed)
+}
+
+g_signed_alpha = creazione_grafo_firmato(df_alpha,TRUE)
+g_signed_otc = creazione_grafo_firmato(df_otc,TRUE)
+
+g_signed_undirected_alpha = creazione_grafo_firmato(df_alpha,FALSE)
+g_signed_undirected_otc = creazione_grafo_firmato(df_otc,FALSE)
+# Verifichiamo che il grafo sia firmato
+is_signed(g_signed_alpha)  
+is_signed(g_signed_otc)
+is_signed(g_signed_undirected_alpha)  
+is_signed(g_signed_undirected_otc)  
+
+```
+
+Indice bilanciamento dei triangoli:
+Commenti:
+Entrambe le reti risultano bilanciate di molto circa 84%. Questo considerando il grafo indiretto con media dei pesi normalizzati tra -1 e +1.
+PRO:
+È il metodo più semplice e trasparente.
+CONTRO:
+Potrebbe non catturare bene la dinamica di fiducia/sfiducia, soprattutto se il nodo che non riceve il reverse edge è sistematicamente in una posizione particolare (ad esempio, se è un nodo isolato o se ha un bilanciamento negativo complessivo).
+```{r}
+balance_triangles_alpha <- balance_score(g_signed_undirected_alpha, method = "triangles")
+balance_triangles_otc <- balance_score(g_signed_undirected_otc, method = "triangles")
+
+cat("Bilanciamento Triangoli:", balance_triangles_alpha, "\t", balance_triangles_otc)
+
+```
+
+
+
+## VISUALIZZAZIONE GRAFICA RETE
+
+Plottiamo i grafi tramite la libreria visnetwork. In questo caso nel grafico mostriamo i nodi colorati in due colori in base al loro bilanciamento:
+-verde: Nodo bilanciato positivamente
+-rosso: Nodo sbilanciato negativamente
+La formula per considerare un nodo bilanciato e' la seguente:
+
+$$
+Bilanciamento_i = \frac{\sum_{j \in entranti} Peso_{ji}}{\text{deg}_{in}(i)} - \frac{\sum_{j \in uscenti} Peso_{ij}}{\text{deg}_{out}(i)}
+$$
+Il bilanciamento è normalizzato per il numero di archi entranti e uscenti, per fare in modo che il numero di archi non influenzi troppo il calcolo finale (come nel caso del PageRank). 
+
+```{r}
+
+# Calcolare il flusso in entrata e in uscita dato un dataframe
+calcolo_flussi = function(df){
+  bilanciamento_nodi <- df %>%
+    # Flusso entrante e numero di archi entranti
+    group_by(Destinazione) %>%
+    summarise(
+      flux_in = sum(Peso),        # Somma dei pesi degli archi entranti
+      num_in = n()                # Numero di archi entranti
+    ) %>%
+    rename(node = Destinazione) %>%
+    full_join(
+      df %>%
+        # Flusso uscente e numero di archi uscenti
+        group_by(Sorgente) %>%
+        summarise(
+          flux_out = sum(Peso),    # Somma dei pesi degli archi uscenti
+          num_out = n()            # Numero di archi uscenti
+        ) %>%
+        rename(node = Sorgente),
+      by = "node"
+    ) %>%
+    mutate(
+      bilanciamento = (coalesce(flux_in, 0) - coalesce(flux_out, 0)) / (coalesce(num_in, 1) + coalesce(num_out, 1))
+    )  
+  return(bilanciamento_nodi)
+}
+
+
+# Visualizzare il risultato del bilanciamento
+
+bilanciamento_nodi_alpha = calcolo_flussi(df_alpha)
+bilanciamento_nodi_otc = calcolo_flussi(df_otc)
+
+bilanciamento_nodi_alpha
+bilanciamento_nodi_otc
+```
+
+Visualizzazione grafi:
+Commenti:
+Entrambe le reti hanno una predominanza di archi blu rispetto a rossi.
+Si ricorda che in Alpha si hanno 6,35% di archi negativi e il 10% in otc.
+Infatti nel grafico di otc si vedono piu' archi rossi anche per il fatto che il 10% e' su piu' di 5000 nodi rispetto i 3000+ di alhpa.
+
+```{r}
+grafo_plot = function(bilanciamento_nodi,df,tot,g,nome){
+  
+  id = data.frame(id=order(unique(c(df$Sorgente,df$Destinazione)), decreasing = FALSE))
+  bilanciamento_nodi$color = ifelse(bilanciamento_nodi$bilanciamento > 0, "green", "red")
+  
+  nodi_bilanciati_colorati <- right_join(id, bilanciamento_nodi, by = c("id" = "node")) %>%
+                              arrange(id)
+
+    # Convertiamo il grafo in un formato compatibile con visNetwork
+  nodes <- data.frame(id = nodi_bilanciati_colorati$id,
+                      label = as.character(nodi_bilanciati_colorati$id),
+                      color = nodi_bilanciati_colorati$color,
+                      size = 10,
+                      title = paste0("<p><b>", as.character(nodi_bilanciati_colorati$id) ,"</b></p>"))
+  edges <- data.frame(
+    from = df$Sorgente,
+    to = df$Destinazione,
+    arrows = "to",  # Indica che il grafo è diretto
+    color = ifelse(E(g)$Peso < 0, "red", "blue") # Colora gli archi in base al peso
+  )
+  
+  #Preleviamo i primi tot nodi e coloriamo i nodi in base al loro grado di bilanciamento
+  nodes_tot <- nodes[1:tot, ,drop = FALSE]
+  
+  # Filtriamo gli archi che connettono solo i nodi presenti in nodes_tot
+  edges_tot <- edges[edges$from %in% nodes_tot$id, ]
+  
+  # Creazione del grafo interattivo
+  visNetwork(nodes_tot, edges_tot, main=paste("Bitcoin",nome," trust weighted signed network")) %>%
+    visEdges(arrows = list(to = list(enabled = TRUE, scaleFactor = 0.5))) %>%  # Mostra le direzioni con frecce scalate
+    visOptions(highlightNearest = list(enabled = TRUE, hover = TRUE, 
+      algorithm = "hierarchical"  # Filtra solo connessioni dirette
+               ),
+      nodesIdSelection = TRUE) %>% 
+    visPhysics(enabled = FALSE)%>%
+    visLegend() %>%
+    visInteraction(dragNodes = FALSE, dragView = TRUE, zoomView = TRUE)
+}
+
+```
+
+
+```{r}
+grafo_plot(bilanciamento_nodi_alpha,df_alpha,nrow(bilanciamento_nodi_alpha),g_alpha,"Alpha")
+grafo_plot(bilanciamento_nodi_otc,df_otc,nrow(bilanciamento_nodi_alpha),g_otc,"OTC")
+
+```
+
+## SIMILARITA
+Avendo una rete diretta abbiamo due nozioni di similarita' in entrata e in uscita.
+Usiamo due metriche:
+1. Jaccard basata su vicini comuni tra due utenti.
+2. coseno basata sui pesi degli archi (quanto sono simili i voti dati).
+
+Esistono utenti con pattern di comportamento simili (es. che valutano altri utenti in modo simile)?
+Commenti:
+Abbiamo calcolato la similarita' di jaccard nei primi 1000 nodi della rete alpha a causa del costo computazionale elevato scoprendo che i nodi 5 e 7  hanno similarita' massima.
+Per quanto riguarda la similarita' del coseno la coppia di nodi 8,3 con 0,83 arriva al secondo posto rispetto a jaccaard con soli 0,57.
+Cio' vuol dire che i nodi 8,3 valutano in modo simile ma utenti diversi dato che jaccard vale 0,33.
+La rete OTC:
+Per la similarita' di jaccard i nodi 8 e 9 hanno similarita' max mentre per il coseno scende a 0.70. Il nodo 3,6 arrivano invece a 0,91.
+
+```{r}
+#ritorna similarita' di jaccard o di coseno
+sim = function(g, misura,df){
+  subset_nodes <- V(g)[1:1000]  # Prendiamo solo i primi 1000
+  # Seleziona solo i nodi con Degree_out > 0
+  nodi_validi <- as.numeric(df$Nodo[df$Degree_Out > 0])
+  # Creiamo il sottografo corrispondente
+  g_subset <- induced_subgraph(g, subset_nodes)
+  # Trasformiamo la sottorete in una matrice di adiacenza
+  data_matrix <- as.matrix(as_adjacency_matrix(g_subset, sparse = FALSE))
+  data_matrix[data_matrix != 0] = 1  
+  colnames(data_matrix) = rownames(data_matrix) #<- colnames(data_matrix) = as.numeric(V(g_signed_alpha))[1:1000]
+  nodi_matrice_num <- subset_nodes
+  # Creiamo la matrice ridotta mantenendo solo i nodi con Degree_out > 0
+  data_matrix_subset <- data_matrix[nodi_matrice_num %in% nodi_validi,]
+  jaccard_dist <- dist(x = data_matrix_subset, method = "Jaccard")
+  # Conversione della distanza in similarità
+  jaccard_sim <- as.matrix(jaccard_dist)
+  if(misura == "cos")
+    return (cosine(data_matrix))
+  else
+    return(jaccard_sim)
+}
+
+# data una matrice ritorna posizione del valore massimo
+sim_max_matrice = function(matrice){
+  jaccard_sim_no_diag <- matrice
+  # Sostituiamo la diagonale con NA per ignorarla nel massimo
+  diag(jaccard_sim_no_diag) <- NA  
+  
+  # Troviamo il valore massimo ignorando la diagonale
+  max_sim <- max(jaccard_sim_no_diag, na.rm = TRUE)
+  
+  # Troviamo la posizione della massima similarità
+  posizione <- which(jaccard_sim_no_diag == max_sim, arr.ind = TRUE)
+  return(posizione)
+}
+
+vicini_in_comune = function(nodo1,nodo2,g){
+  # Estraiamo i vicini dei nodi 8 e 9
+  vicini_1 <- neighbors(g, nodo1, mode = "out")
+  vicini_2 <- neighbors(g, nodo2, mode = "out")
+  
+  # Troviamo i vicini in comune
+  vicini_comuni<- intersect(vicini_1, vicini_2)
+  
+  # Stampiamo il risultato
+  cat("\nBitcoin OTC - Confronto Nodi ",nodo1, " e ", nodo2, "\n")
+  cat("Nodo ",nodo1, " ha", length(vicini_1), "vicini\n")
+  cat("Nodo ",nodo2, " ha", length(vicini_2), "vicini\n")
+  cat("Vicini in comune:", length(vicini_comuni), "\n")
+  print(vicini_comuni)
+  return(length(vicini_comuni))
+}
+
+#jac_alpha = sim(g_signed_alpha,"j",df_centrality_alpha)
+#cos_alpha = sim(g_signed_alpha,"cos",df_centrality_alpha)
+
+#Preleviamo le coppie con similarita' massima
+#pos_alpha_jac =  sim_max_matrice(jac_alpha)
+#vicini_in_comune(pos_alpha_jac)
+
+#cat("valore jaccard + alto:", sim_max_matrice(jac_alpha), " valore coseno + alto:", sim_max_matrice(cos_alpha))
+
+
+#jac_otc = sim(g_signed_otc,"j",df_centrality_otc)
+#cos_otc = sim(g_signed_otc,"cos",df_centrality_otc)
+
+
+```
+
+Alpha:
+I nodi 4  e 2 hanno similarita' di jaccard maggiore pari a 0.1884058 con 65 amici in comune.
+OTC:
+I nodi 7  e 1 hanno similarita' di jaccard maggiore pari a  0.1888298 con 71 amici in comune.
+```{r}
+jaccard_similarity <- function(set1, set2) {
+  # Calcola l'unione
+  union_size <- length(union(set1, set2))
+  # Calcola l'intersezione
+  intersection_size <- length(intersect(set1, set2))
+  # Se entrambi sono vuoti, definiamo la similarità come 1 (o come preferisci)
+  if(union_size == 0) {
+    return(-1)
+  }
+  if(length(intersect(set1, set2)) < 10)
+    return(-2)
+  else {
+    return(intersection_size / union_size)
+  }
+}
+
+jaccard_similarita_coppia = function(df,g){
+  nodi_validi <- as.numeric(df$Nodo[df$Degree_Out > 0])
+  num_nodi = length(nodi_validi)
+  sim_max = 0
+  sim = 0
+  nodo1 = 0
+  nodo2 = 0  
+  # Inizializza una matrice per memorizzare le similarità
+  num_nodi <- 10#length(nodi_validi)
+  similarity_matrix <- matrix(NA, nrow = num_nodi, ncol = num_nodi,
+                              dimnames = list(nodi_validi[1:num_nodi], nodi_validi[1:num_nodi]))
+  # Calcola la similarità di Jaccard per ogni coppia di nodi validi
+  for (i in 1:(num_nodi-1)) {
+    for (j in (i + 1):num_nodi) {
+      nodo_i <- nodi_validi[i]
+      nodo_j <- nodi_validi[j]
+      vicini_i <- neighbors(g, nodo_i, mode = "out")
+      vicini_j <- neighbors(g, nodo_j, mode = "out")
+      sim <- jaccard_similarity(vicini_i, vicini_j)
+      similarity_matrix[i, j] <- sim
+      similarity_matrix[j, i] <- sim
+      if(i == 1)
+        sim_max = sim
+      if(sim>sim_max){
+        sim_max = sim
+        nodo1= nodo_i
+        nodo2 = nodo_j
+      }
+    }
+  }
+  cat(nodo1," nodo2: ", nodo2, "sim ",sim_max)
+  return(c(nodo1,nodo2,sim_max))
+}
+
+vett = jaccard_similarita_coppia(df_centrality_alpha,g_signed_alpha)
+vett = jaccard_similarita_coppia(df_centrality_otc,g_signed_otc)
+nodo1 = vett[1]
+nodo2 = vett[2]
+
+```
+
+
+Controlliamo i vicini dei nodi con similarita' maggiore, ovvero 4 e 2
+```{r}
+# Estraiamo i vicini dei nodi 
+vicini_8 <- neighbors(g_signed_alpha, nodo1  , mode = "out")
+vicini_9 <- neighbors(g_signed_alpha, nodo2, mode = "out")
+
+vicini_7 <- neighbors(g_signed_otc, nodo1  , mode = "out")
+vicini_1 <- neighbors(g_signed_otc, nodo2, mode = "out")
+
+# Troviamo i vicini in comune
+vicini_comuni_8_9 <- intersect(vicini_7, vicini_1)
+
+# Stampiamo il risultato
+cat("\nBitcoin OTC - Confronto Nodi ",nodo1," e ",nodo2 ,"\n")
+cat("Nodo ",nodo1," ha", length(vicini_8), "vicini\n")
+cat("Nodo ",nodo2," ha", length(vicini_9), "vicini\n")
+cat("Vicini in comune:", length(vicini_comuni_8_9), "\n")
+cat("similarita: ",jaccard_similarity(vicini_8, vicini_9), "\n")
+print(vicini_comuni_8_9)
+
+```
+
+## ETEROGENEITA'
+Commenti:
+Alpha:
+valore massimo di eterogeneita' simpson bitcoin alpha:  0.9954466  appartenente al nodo:  798 
+valore massimo di eterogeneita' shannon bitcoin alpha:  17.77238  appartenente al nodo:  798 
+
+OTC:
+valore massimo di eterogeneita' shannon bitcoin otc:  19.9398  appartenente al nodo:  135 
+valore massimo di eterogeneita' bitcoin otc:  19.9398  appartenente al nodo:  35 
+```{r}
+simpson = function(p) {
+  x = 1 - sum(p * p)
+  return(x)
+}
+shannon = function(p) {
+  x = p * log2(p)
+  x = replace(x, is.nan(x), 0)
+  return(-sum(x))
+}
+heterogeneity = function(g,tot,mode = "col") {
+  subset_nodes <- V(g)[1:tot]  # Prendiamo solo i primi 1000
+  # Creiamo il sottografo corrispondente
+  g_subset <- induced_subgraph(g, subset_nodes)
+  A = as_adjacency_matrix(g_subset, attr = "weight", sparse = FALSE)
+  if (mode == "col") {
+    A = A %*% diag(1/colSums(A)) #normalizzazione colonne
+    dim = 2 #applica apply su ciascuna colonna
+  } else {
+    A = diag(1/rowSums(A)) %*% A #normalizzazione righe
+    dim = 1  #applica apply su ciascuna riga 
+  }
+  return(list(shannon = apply(A, dim, shannon), 
+              simpson = apply(A, dim, simpson)))
+}
+```
+
+```{r}
+lista = heterogeneity(g_signed_alpha,nrow(df_centrality_alpha) )
+nodes_ids_alpha <- V(g_signed_alpha)  # ID dei nodi nel grafo
+cat("valore massimo di eterogeneita' bitcoin alpha: ",max(unlist(lista[1]), na.rm = FALSE), " appartenente al nodo: ", nodes_ids_alpha[which.max(unlist(lista[1]))], "\n")
+cat("valore massimo di eterogeneita' bitcoin alpha: ",max(unlist(lista[2]), na.rm = TRUE), " appartenente al nodo: ", nodes_ids_alpha[which.max(unlist(lista[1]))], "\n")
+
+lista_otc = heterogeneity(g_signed_otc,nrow(df_centrality_otc))
+nodes_ids_otc <- V(g_signed_otc)  # ID dei nodi nel grafo
+cat("valore massimo di eterogeneita' bitcoin otc: ",max(unlist(lista_otc[1]), na.rm = FALSE), " appartenente al nodo: ", nodes_ids_otc[which.max(unlist(lista_otc[1]))],"\n")
+cat("valore massimo di eterogeneita' bitcoin otc: ",max(unlist(lista_otc[1]), na.rm = FALSE), " appartenente al nodo: ", nodes_ids_otc[which.max(unlist(lista_otc[2]))],"\n")
+
+```
+
+
+
+## ANALISI DI GRUPPO
+
+Iniziamo con una analisi delle comunita' applicando diversi metodi
+Il grafo viene considerato indiretto a causa della libreria.
+groups: 165, mod: 0.38
+Esistono gruppi di utenti che si fidano o sfidano reciprocamente?
+Commenti Alpha:
+21 gruppi con mod: 0.47
+
+Commenti OTC:
+23, mod: 0.49
+```{r}
+#Trasformiamo il grafo in indiretto
+grafo_indiretto = function(g){
+  g_signed = g
+  edge_weights <- E(g_signed)$Peso
+  
+  # Trova il peso minimo
+  min_weight <- min(edge_weights)
+  
+  # Se il peso minimo è negativo, trasla i pesi
+  if (min_weight < 0) {
+    shift_value <- abs(min_weight) + 1
+    E(g_signed)$weight <- edge_weights + shift_value
+  }
+  
+  # Converte il grafo in non diretto
+  g_undirected <- as.undirected(g_signed, mode = "collapse", edge.attr.comb = "mean")
+  return(g_undirected)
+}
+
+g_undirected_alpha = grafo_indiretto(g_alpha)
+g_undirected_otc = grafo_indiretto(g_otc)
+
+# Applichiamo l'algoritmo Louvain per rilevare le comunità
+communities_louvain_alpha <- cluster_louvain(g_undirected_alpha)
+communities_louvain_otc <- cluster_louvain(g_undirected_otc)
+
+plot(communities_louvain_alpha, g_undirected_alpha, vertex.label = NA,
+     main = "Community detection (Louvain) in Bitcoin Alpha Network")
+
+plot(communities_louvain_otc, g_undirected_otc, vertex.label = NA,
+     main = "Community detection (Louvain) in Bitcoin OTC Network")
+
+```
+
+Visualizziamo le comunita' Alpha con visnetwork, le dimensione dei nodi dipendono dai numero di nodi che appartengono alla comunita.
+Comunita' in ordine di grandezza:
+2 con 654 nodi
+4	497	nodi		
+5	581 nodi
+```{r}
+# Estrai i nodi dal grafo
+id = V(g_undirected_alpha)$name
+nodi_alpha = data.frame( id = id, 
+                         group = communities_louvain_alpha$membership,
+                         label = as.character(id))
+
+# Estrai gli archi dal grafo
+edges_alpha <- as.data.frame(get.data.frame(g_undirected_alpha, what = "edges"))
+edges_tot = edges_alpha%>%
+            select(from,to,weight)
+
+
+nodi_alpha2 = nodi_alpha %>%
+    group_by(id = as.character(group)) %>%
+    summarise(dimensione = n())
+
+archi_gruppi = edges_tot %>%
+  inner_join(nodi_alpha, by = c("from"="id")) %>%
+  rename(origine_sorg = group)
+
+archi_gruppi = archi_gruppi %>%
+  inner_join(nodi_alpha, by = c("to"="id")) %>%
+  rename(origine_dest = group)
+
+#archi_gruppi = archi_gruppi %>%
+#    group_by(origine, to) %>%
+#    summarise(peso = mean(weight))
+
+#eliminiamo i collegamenti interni
+archi_gruppi_fuori = filter(archi_gruppi, origine_sorg != origine_dest)
+#Raggruppiamo i nodi per origine e destinazione
+#Dataframe archi
+archi_gruppi_fuori = archi_gruppi_fuori %>%
+  group_by(origine_sorg,origine_dest) %>%
+  summarise(peso = mean(weight))
+
+archi_gruppi_net <- data.frame(
+    from = archi_gruppi_fuori$origine_sorg,
+    to = archi_gruppi_fuori$origine_dest,
+    label = archi_gruppi_fuori$peso
+  )
+#normalizziamo la dimensione delle comunita' con min max normalization
+min_val <- min(nodi_alpha2$dimensione, na.rm = TRUE)
+max_val <- max(nodi_alpha2$dimensione, na.rm = TRUE)
+# Normalizzazione tra 10 e 40
+nodi_alpha2$valori_normalizzati <- 10 + ((nodi_alpha2$dimensione - min_val) / (max_val - min_val)) * (40 - 10)
+
+#associamo un colore ad ogni comunita
+nodi_alpha2$colore = rainbow(nrow(nodi_alpha2))
+nodi_gruppi_net <- data.frame(id = nodi_alpha2$id,
+                      label = nodi_alpha2$id,
+                      color = nodi_alpha2$colore,
+                      size = nodi_alpha2$valori_normalizzati,
+                      title = paste0("<p><b>Gruppo:",as.character(nodi_alpha2$id)," nodi:",as.character(nodi_alpha2$dimensione) ,"</b></p>"))
+
+visNetwork(nodi_gruppi_net, archi_gruppi_net,main=paste("Community detection (Louvain) in Bitcoin Alpha Network")) %>%
+  visInteraction(dragNodes = TRUE, dragView = TRUE, zoomView = TRUE) %>%
+  visNodes(color = nodi_gruppi_net$color) %>%
+  visEdges( color = "grey", label = as.character(archi_gruppi_net$label))%>%
+  visOptions(highlightNearest = TRUE,nodesIdSelection = TRUE) %>% 
+  visLegend() %>%
+  visPhysics(enabled = TRUE, # Attiva la fisica
+             solver = "forceAtlas2Based", # Usa un layout fisico
+             maxVelocity = 10, # Limita la velocità di movimento
+             forceAtlas2 = list(gravitationalConstant = -21, # Forza di gravità
+                                centralGravity = 0.03))
+```
+
+Visualizziamo le comunita' OTC con visnetwork, le dimensione dei nodi dipendono dai numero di nodi che appartengono alla comunita con range max e minimo per non rendere il grafo troppo sbilanciato.
+Comunita' in ordine di grandezza:
+2 con 1135 nodi
+4	1002	nodi		
+1	915 nodi
+```{r}
+# Estrai i nodi dal grafo
+id = V(g_undirected_otc)$name
+nodi_otc = data.frame( id = id, 
+                         group = communities_louvain_otc$membership,
+                         label = as.character(id))
+
+# Estrai gli archi dal grafo
+edges_otc <- as.data.frame(get.data.frame(g_undirected_otc, what = "edges"))
+edges_tot_otc = edges_otc%>%
+            select(from,to,weight)
+
+
+nodi_otc2 = nodi_otc %>%
+    group_by(id = as.character(group)) %>%
+    summarise(dimensione = n())
+
+archi_gruppi_otc = edges_tot_otc %>%
+  inner_join(nodi_otc, by = c("from"="id")) %>%
+  rename(origine_sorg = group)
+
+archi_gruppi_otc = archi_gruppi_otc %>%
+  inner_join(nodi_otc, by = c("to"="id")) %>%
+  rename(origine_dest = group)
+
+#eliminiamo i collegamenti interni
+archi_gruppi_fuori_otc = filter(archi_gruppi_otc, origine_sorg != origine_dest)
+#Raggruppiamo i nodi per origine e destinazione
+#Dataframe archi
+archi_gruppi_fuori_otc = archi_gruppi_fuori_otc %>%
+  group_by(origine_sorg,origine_dest) %>%
+  summarise(peso = mean(weight))
+
+archi_gruppi_ne_otct <- data.frame(
+    from = archi_gruppi_fuori_otc$origine_sorg,
+    to = archi_gruppi_fuori_otc$origine_dest,
+    label = archi_gruppi_fuori_otc$peso
+  )
+#normalizziamo la dimensione delle comunita' con min max normalization
+min_val <- min(nodi_otc2$dimensione, na.rm = TRUE)
+max_val <- max(nodi_otc2$dimensione, na.rm = TRUE)
+# Normalizzazione tra 10 e 40
+nodi_otc2$valori_normalizzati <- 10 + ((nodi_otc2$dimensione - min_val) / (max_val - min_val)) * (40 - 10)
+
+#associamo un colore ad ogni comunita
+nodi_otc2$colore = rainbow(nrow(nodi_otc2))
+nodi_gruppi_net_otc <- data.frame(id = nodi_otc2$id,
+                      label = nodi_otc2$id,
+                      color = nodi_otc2$colore,
+                      size = nodi_otc2$valori_normalizzati,
+                      title = paste0("<p><b>Gruppo:",as.character(nodi_otc2$id)," nodi:",as.character(nodi_otc2$dimensione) ,"</b></p>"))
+
+visNetwork(nodi_gruppi_net_otc, archi_gruppi_ne_otct,main=paste("Community detection (Louvain) in Bitcoin OTC Network")) %>%
+  visInteraction(dragNodes = TRUE, dragView = TRUE, zoomView = TRUE)%>%
+  visNodes(color = nodi_gruppi_net_otc$color) %>%
+  visEdges( color = "grey", label = as.character(archi_gruppi_net$label))%>%
+  visOptions(highlightNearest = TRUE,nodesIdSelection = TRUE) %>% 
+  visLegend() %>%
+  visPhysics(enabled = TRUE, # Attiva la fisica
+             solver = "forceAtlas2Based", # Usa un layout fisico
+             maxVelocity = 10, # Limita la velocità di movimento
+             forceAtlas2 = list(gravitationalConstant = -21, # Forza di gravità
+                                centralGravity = 0.03))
+```
+Controlliamo quali comunita' sono piu' legate fra loro e quelle meno legate?
+Commenti Alpha:
+Le comunita' che sono piu' fiduciose tra loro sono tra la 8 e la 7 con 15 di valutazione (media dei pesi archi uscenti)
+Le comunita' che sono meno fiduciose tra loro  con 1 di valutazione sono:
+1	14			
+2	20			
+5	20			
+6	12			
+13 4			
+13 5		
+Commenti otc:
+Le comunita' che sono piu' fiduciose tra loro sono tra la 9 e la 10 con 16 di valutazione
+Le comunita' che sono meno fiduciose tra loro sono 17 (molte rispetto ad Alpha) e sono le seguenti:
+1	13			
+7	6			
+7	21	
+9	7			
+10	12			
+10	16			
+11	9			
+14	3			
+14	9			
+16	1			
+```{r}
+filter(archi_gruppi_net, archi_gruppi_net$label == max(archi_gruppi_net$label))
+filter(archi_gruppi_ne_otct, archi_gruppi_ne_otct$label == max(archi_gruppi_ne_otct$label))
+
+filter(archi_gruppi_net, archi_gruppi_net$label == min(archi_gruppi_net$label))
+filter(archi_gruppi_ne_otct, archi_gruppi_ne_otct$label == min(archi_gruppi_ne_otct$label))
+```
+
+Proviamo la variante Label propagation.
+Commenti Alpha:
+Performa molto male rispetto a louvian, groups: 50, mod: 0.12
+Commenti otc:
+Performa malissimo meno rispetto a louvian, groups: 71, mod: 0.052
+```{r}
+cluster_label_prop(g_undirected_alpha, weights = edges_tot$weight, initial = NULL, fixed = NULL)
+cluster_label_prop(g_undirected_otc, weights = edges_tot_otc$weight, initial = NULL, fixed = NULL)
+```
+
+Esistono nodi con un comportamento intermediario tra gruppi (es. nodi con alta betweenness)?
+Preleviamo per ogni comunita' i primi 2 nodi con maggiore betwenneess e verifichiamo se questa metrica raggiunge un valore sufficiente per ritenere un nodo intermediario.
+Sapendo che il valore massimo di betweenness in un grafo e' quando e' a stella e corrisponde a:
+$$
+[(n-1)(n-2)]/2
+$$
+Commenti Alpha:
+La centralita' piu' alta e' del nodo 1 della comunita' 1 con bet 2132894, gradi in entrata 398 e 490 in uscita.
+Il secondo migliore e' il nodo 2 della comunita' 5 	con grao entrata 205, uscita 195 e bet:	893043.9	
+Il terzo migliore e' il nodo 11 della comunita' 2	con grao entrata 203, uscita 203 e bet:	726200.6	
+
+Commenti OTC:
+La centralita' piu' alta e' del nodo 35 della comunita' 3 con bet 4912540, gradi in entrata 535 e 763 in uscita.
+Il secondo migliore e' il nodo 2642 della comunita' 8 	con grao entrata 412, uscita 406 e bet:	2150220		
+Il terzo migliore e' il nodo 905 della comunita' 1	con grao entrata 264, uscita 264 e bet:	1664216
+```{r}
+#preleviamo la betwenneess piu' alta per ogni comunita' e vediamo il nodo che corrisponde
+bet_oct_com = nodi_otc %>%
+ inner_join(df_centrality_otc, by = c("id"= "Nodo"))
+bet_oct_com = bet_oct_com %>%
+  group_by(group)%>%
+  summarise(Betweenness = max(Betweenness)) %>%
+  arrange(desc(Betweenness))
+
+nodo_bet_otc_1 = filter(df_centrality_otc, df_centrality_otc$Betweenness == bet_oct_com$Betweenness[1])
+nodo_bet_otc_2 = filter(df_centrality_otc, df_centrality_otc$Betweenness == bet_oct_com$Betweenness[2])
+nodo_bet_otc_3 = filter(df_centrality_otc, df_centrality_otc$Betweenness == bet_oct_com$Betweenness[3])
+#ALPHA
+bet_alpha_com = nodi_alpha %>%
+ inner_join(df_centrality_alpha, by = c("id"= "Nodo"))
+bet_alpha_com = bet_alpha_com %>%
+  group_by(group)%>%
+  summarise(Betweenness = max(Betweenness)) %>%
+  arrange(desc(Betweenness))
+
+nodo_bet_alpha_1 = filter(df_centrality_alpha, df_centrality_alpha$Betweenness == bet_alpha_com$Betweenness[1])
+nodo_bet_alpha_2 = filter(df_centrality_alpha, df_centrality_alpha$Betweenness == bet_alpha_com$Betweenness[2])
+nodo_bet_alpha_3 = filter(df_centrality_alpha, df_centrality_alpha$Betweenness == bet_alpha_com$Betweenness[3])
+```
+
+## SMALL WORLD
+Anche se non ha molto senso guardare se la rete e' a piccolo mondo calcoliamo lo stesso il diametro e la lunghezza media dei cammini geodetici.
+Possiamo far finta di non sapere un indirizzo a cui eseguire la transazione e quindi chiediamo a qualcun altro di passare la transazione a un suo conoscente fino a farla arrivare a destinazione.
+
+Commenti:
+Diametro alpha:  10  diametro otc:  11
+Media percorsi geodetici alpha:  3.678864  Media percorsi geodetici otc:  3.718913
+
+```{r}
+# diametro
+diametro_alpha = diameter(g_alpha)
+diametro_otc = diameter(g_otc)
+
+cat("Diametro alpha: ",diametro_alpha, " diametro otc: ",diametro_otc )
+
+geodetici_alpha = mean_distance(g_alpha)
+geodetici_otc = mean_distance(g_otc)
+
+cat("Media percorsi geodetici alpha: ",geodetici_alpha, " Media percorsi geodetici otc: ",geodetici_otc )
+
+```
+
+## SMALL WORLD COMUNITA' PIU' GRANDE
+
+Facciamo la stessa cosa prendendo pero' la comunita' piu' grande rilevata precedentemente per entrambe le reti alpha e otc.
+Commenti:
+Per la comunita' 2 con 654 nodi di alpha abbiamo:
+Diametro alpha comunita 2 :  85  media geodetica:  32.24518
+Per la comunita' 5 con 1135 nodi di OTC abbiamo:
+Diametro otc comunita 2 :  173  media geodetica:   51.49518
+```{r}
+# ritorna un sottgrafo in base al numero di comnunita passata 
+sottografo = function(archi_gruppi, comunita){
+  #Preleviamo i nodi dentro la comunita' 2
+  com = filter(archi_gruppi, archi_gruppi$origine_sorg == comunita & archi_gruppi$origine_dest == comunita)
+  com = com%>%
+    select("from", "to", "weight")
+  #generiamo il sottografo della comunita' 2
+  g_com <- graph_from_data_frame(com, directed = TRUE)
+  # Aggiungi il peso agli archi
+  E(g_com)$weight <- com$weight
+  return(g_com)
+}
+
+g_alpha_com2 = sottografo(archi_gruppi,2)
+diametro_alpha_com2 = diameter(g_alpha_com2)
+geodetici_alpha_com2 = mean_distance(g_alpha_com2)
+cat("Diametro alpha: ",diametro_alpha_com2, " media geodetica: ",geodetici_alpha_com2 )
+
+
+g_otc_com5 = sottografo(archi_gruppi_otc,2)
+diametro_otc_com5 = diameter(g_otc_com5)
+geodetici_otc_com5 = mean_distance(g_otc_com5)
+cat("Diametro alpha: ",diametro_otc_com5, " media geodetica: ",geodetici_otc_com5 )
+```
+```{r}
+visualizzazione_diamtetro = function(g){
+d = get_diameter(g)
+print(d)
+V(g)$color  = "white"
+E(g)$color = "grey"
+E(g)$width = 1
+E(g, path=d)$color = "red"
+E(g, path=d)$width = 2
+V(g)[d]$color = "red"
+plot(g, vertex.label = NA, vertex.size=5)
+}
+visualizzazione_diamtetro(g_alpha_com2)
+visualizzazione_diamtetro(sottografo(archi_gruppi_otc,18))
+
+```
+
+
+## BILANCIAMENTO COMUNITA' PIU' GRANDE
+Analizziamo il bilanciamento interno della comunita' 2 con 908 nodi
+Questa volta usiamo il seguente approccio piu' robusto per le reti non completamente connesse e dirette:
+Il grado di bilanciamento (o "balance index") di un nodo i in modo che rifletta la differenza tra il flusso (cioè, la somma dei pesi) in entrata e in uscita, normalizzata per tener conto delle dimensioni diverse dei nodi.
+La formula è:
+$$
+  Bnorm_i = \frac{Fin(i) - Fout(i)}{|Fin(i)|+|Fout(i)|}
+$$
+
+dove
+
+>    Fin(i) è la somma dei pesi degli archi in entrata (escludendo eventuali self-loop) diviso il numero di archi in entrata,
+>    Fout è la somma dei pesi degli archi in uscita (escludendo eventuali self-loop), diviso il numero di archi in uscita.
+
+Questa metrica restituisce un valore compreso tra -1 e 1:
+
+Se Bnorm(i) è positivo, il nodo riceve più “flusso” (valutazioni) positivo a quello che invia, suggerendo una posizione "positiva" (più fiducia in entrata).
+Se è negativo, il nodo invia più valutazioni (o flusso negativo) negative quindi tenedera' a dare valutazioni negative.
+Se è zero, significa che l’insieme dei pesi in entrata e uscita è bilanciato
+
+Commenti:
+Avendo reciprocita' pari a zero la seguente comunita' dovremmo affidarci completamente alla formula senza media dei pesi negli archi indiretti.
+Abbiamo un bilanciamento pari a 0.9759288 in Alpha nella sua comnuita' 2 con dimensione maggiore. 
+Abbiamo un bilanciamento pari a 0.9846311 in OTC nella sua comnuita' 2 con dimensione maggiore. 
+```{r}
+bilanciamento_comunita = function(g){
+ 
+  E(g)$weight = E(g)$weight - 11
+  #grado in entrata
+  gradi_entrata_f_in = degree(g, mode="in")
+  gradi_uscita_f_out = degree(g, mode="out")
+
+  # Utilizziamo la funzione strength per calcolare la somma dei pesi in entrata e uscita:
+  F_in <- strength(g, mode = "in", weights = E(g)$weight) 
+  F_out <- strength(g, mode = "out", weights = E(g)$weight) 
+  F_in = ifelse(gradi_entrata_f_in==0, 0, F_in/gradi_entrata_f_in) 
+  F_out = ifelse(gradi_uscita_f_out==0, 0, F_out/gradi_uscita_f_out) 
+
+  # Calcoliamo il balance index normalizzato per ogni nodo gestendo le divisioni 0/0 
+  B_norm <- ifelse((abs(F_in) + abs(F_out)) == 0, 0, (F_in + F_out) / (abs(F_in) + abs(F_out)))
+  B_norm <- ifelse(F_in == 0, F_out, B_norm) #cosi' se abbiamo 0/0.5 non da 1 come bilanciamento
+  
+  # Creiamo un data frame per visualizzare i risultati
+  balance_df_com2 <- data.frame(
+    Node = V(g)$name,
+    F_in = F_in,
+    F_out = F_out,
+    Balance = B_norm
+  )
+
+  #Se esiste la relazione x->y ma non y->x aggiungiamo un arco con peso 10*Balance
+  edges_df_com2 <- get.data.frame(g, what = "edges")
+  #Per aggregare le relazioni in maniera simmetrica, creiamo due colonne che ordinino gli ID indipendentemente dalla direzione
+  edges_df_com2 = edges_df_com2 %>%
+    mutate(min_node = pmin(from, to),
+           max_node = pmax(from, to))
+  #Raggruppa per coppia non ordinata (min_node, max_node)
+  aggregated_edges <- edges_df_com2 %>%
+    group_by(min_node, max_node) %>%
+    summarise(
+      # Se esistono entrambi gli archi, avranno due righe: 
+      w1 = if (any(from == min_node & to == max_node)) first(weight[from == min_node & to == max_node]) else { NA },
+      w2 = if (any(from == max_node & to == min_node)) first(weight[from == max_node & to == min_node]) else { NA },
+      .groups = "drop"
+    )
+  
+  aggregated_edges <- aggregated_edges %>% rowwise() %>%
+    mutate(
+      imp_w1 = ifelse(is.na(w1), 10 * B_norm[as.character(min_node)], w1),
+      imp_w2 = ifelse(is.na(w2), 10 * B_norm[as.character(max_node)], w2),
+      # Calcola la media dei due (se entrambi esistono, media; se uno manca, la media con il valore imputato)
+      w_agg = (imp_w1 + imp_w2) / 2
+    ) %>% ungroup()
+
+  #normalizziamo w_agg tra -1 e +1
+  aggregated_edges$w_agg = aggregated_edges$w_agg/10
+  aggregated_edges$w_agg = ifelse(aggregated_edges$w_agg>1,1,aggregated_edges$w_agg)
+  segni = sign(aggregated_edges$w_agg)
+  #ai valori =0 diamo un rate positivo
+  segni[segni == 0] <- 1
+  # Crea il nuovo grafo indiretto aggregato
+  g_aggregated_com2_finale <-  graph_from_edgelist_signed(as.matrix(aggregated_edges[, c("min_node", "max_node")]), 
+                                         signs = segni, 
+                                         directed = FALSE)
+  
+  return(g_aggregated_com2_finale)
+}
+g_aggregated_com2_finale = bilanciamento_comunita(g_alpha_com2)
+g_aggregated_com5_finale_otc = bilanciamento_comunita(g_otc_com5)
+
+#trasformiamo il grafo della comunita' in una rete con segno
+is_signed(g_aggregated_com2_finale) 
+cat("bilanciamento comunita alpha 2:",balance_score(g_aggregated_com2_finale, method = "triangles"))
+
+is_signed(g_aggregated_com5_finale_otc) 
+balance_score(g_aggregated_com5_finale_otc, method = "triangles")
+
+```
+
+Quale comunita' ha il bilanciamento piu' basso (prese quelle con + di 50 elementi)?
+Commenti Alpha:
+1	1.0000000			
+2	0.9759288			
+3	0.9876543			
+4	0.9633431			
+5	0.9919028			
+6	0.7923875			
+7	0.9781167			
+8	0.9642857			
+9	0.9637681			
+10	1.0000000	
+Commenti OTC:
+La piu' bassa e' la comunita' 9 con bilanciamento	0.2131439. tutte le altre con almeno 50 nodi superano il 0,90.
+1	0.9580550			
+2	0.9846311			
+3	1.0000000			
+4	0.9529694			
+5	0.9801136			
+6	0.9797898			
+7	0.7272727			
+8	0.9069359			
+9	0.2131439			
+10	1.0000000	
+```{r}
+bilanciamento_comunita_totali = function(archi,num_nodi,selected_groups){
+  num = num_nodi
+  vett = c(num)
+  for(i in 1:num){
+     grafo = sottografo(archi,selected_groups[i])
+     g_comI = bilanciamento_comunita(grafo)
+     vett[i] = balance_score(g_comI, method = "triangles")
+  }
+  return(vett)
+}
+# preleviamo il numero di comunita
+group_counts <- table(communities_louvain_otc$membership)
+selected_groups_otc <- as.integer(names(group_counts[group_counts >= 50]))
+num_alpha <- table(communities_louvain_alpha$membership)
+selected_groups_alpha <- as.integer(names(num_alpha[num_alpha >= 50]))
+
+vett_com_alpha = bilanciamento_comunita_totali(archi_gruppi,length(selected_groups_alpha),selected_groups_alpha)
+vett_com_otc = bilanciamento_comunita_totali(archi_gruppi_otc,length(selected_groups_otc),selected_groups_otc)
+#visualizziamo risultati con dataframe
+data.frame(gruppo = selected_groups_otc,bilanciamento = vett_com_otc)
+data.frame(gruppo = selected_groups_alpha,bilanciamento = vett_com_alpha)
+```
+
+
+## RECIPROCITA' DELLA RETE
+Commenti:
+Per alpha abbiamo una reciprocita' pari a 0.8320516, per OTC 0.7923129.
+```{r}
+reciprocity(g_alpha)
+reciprocity(g_otc)
+
+```
+
+## ANDAMENTO TEMPORALE
+
+Visualizziamo sotto forma di gif l'andamento temporarle della distribuzione dei gradi usando l'attributo TimeStamp fornitoci dai dati.
+
+```{r}
+
+# Estraiamo il timestamp ogni 5 giorni
+timestamps <- sort(unique(E(g_otc)$TimeStamp))
+time_intervals <- seq(min(timestamps), max(timestamps), by = "15 day")
+#time_intervals <- time_intervals[1:10]
+
+# Dataframe per i dati di evoluzione
+degree_evolution <- data.frame()
+degree_evolution_otc <- data.frame()
+
+# Ciclo sui time intervals
+for (t in time_intervals) {
+  # Filtra gli archi fino al tempo t
+  sub_edges <- E(g_otc)[TimeStamp <= t]
+  
+  # Crea il sottografo
+  g_sub <- subgraph.edges(g_otc, sub_edges, delete.vertices = TRUE)
+  
+  # Calcola le centralità di grado
+  df_centralita <- centralita(g_sub)
+  
+  df_long <- data.frame(
+    Degree = c(df_centralita$Degree_In, df_centralita$Degree_Out),
+    Type = rep(c("In-Degree", "Out-Degree"), each = nrow(df_centralita)),
+    Time = as.Date(as.POSIXct(t, origin = "1970-01-01"))
+  )
+  #for(i in 1:nrow(df_long)) {
+  #  degree_evolution <- rbind(degree_evolution, df_long[i, , drop = FALSE])
+  #}
+  # Unisci i dati
+  degree_evolution_otc <- rbind(degree_evolution_otc, df_long)
+}
+
+# Filtriamo i gradi == 0 
+degree_evolution <- degree_evolution %>%
+  filter(Degree > 0)
+
+degree_evolution_otc <- degree_evolution_otc %>%
+  filter(Degree > 0)
+
+# Creazione del grafico con gganimate
+p <- ggplot(degree_evolution_otc, aes(x = Degree, fill = Type)) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "dodge") +
+  scale_x_continuous(trans="log1p") + #Evita problemi con log(0),togliamo lo spazio tra assi
+  scale_y_continuous(expand = c(0, 0))+
+  scale_fill_manual(name = "Tipo di grado", 
+                    values = c("In-Degree" = "blue", "Out-Degree" = "red"),
+                    labels = c("In-Degree" = "Grado entrante", "Out-Degree" = "Grado uscente")) +
+  labs(title = "Distribuzione dei gradi Bitcoin OTC al tempo: {frame_time}", 
+       x = "Grado", y = "Frequenza",
+       subtitle = "Distribuzione a coda lunga dei nodi",
+       caption = "Sorgente dati: https://snap.stanford.edu/data/soc-sign-bitcoin-otc.html") +
+  theme_classic() +
+  theme(plot.title = element_text(color = "black", size = 12, face = "bold",hjust = 0.5),
+          plot.subtitle = element_text(color = "darkblue",hjust = 0.5),
+          plot.caption = element_text(color = "black", face = "italic"),
+          axis.title = element_text(color = "darkblue"),
+          legend.title = element_text(face = "bold"))+
+  transition_time(Time)
+
+# Salva l'animazione
+anim <- animate(p, nframes = length(time_intervals), fps = 5, renderer = gifski_renderer(),res = 100,height = 480, width =650)
+anim_save("evoluzione_degree_otc.gif", animation = anim)
+```
+
+Fine

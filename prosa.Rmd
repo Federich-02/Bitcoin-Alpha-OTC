@@ -1,0 +1,250 @@
+---
+title: "prosa"
+author: "Marinato Federico"
+date: "2025-02-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Analisi della Rete Bitcoin
+
+## Introduzione
+L'analisi presentata in questo documento si concentra su due reti di fiducia legate alle transazioni Bitcoin: Bitcoin OTC e Bitcoin Alpha. Entrambe le reti rappresentano piattaforme di scambio peer-to-peer, in cui gli utenti possono valutare la fiducia reciproca tramite un sistema di rating.
+
+Il nostro obiettivo è esplorare la struttura di queste reti attraverso misure di centralità, distribuzioni di grado e visualizzazioni dinamiche per comprendere meglio il comportamento degli utenti.
+
+Questo studio analizza la rete Bitcoin Alpha e OTC utilizzando dati transazionali per estrarre informazioni strutturali sulla connettività tra gli utenti. L'obiettivo principale è comprendere le proprietà della rete, il comportamento degli utenti e le possibili implicazioni economiche.
+
+L'analisi si basa su un dataset di transazioni, trattato come un grafo diretto, in cui i nodi rappresentano gli utenti e gli archi rappresentano le transazioni effettuate tra di essi. La ponderazione degli archi dipende dalla quantità di Bitcoin trasferita.
+
+## Struttura della Rete
+
+- Le reti in esame sono dirette, pesate e con segni:
+- I nodi rappresentano gli utenti che scambiano Bitcoin.
+- Gli archi indicano una valutazione di fiducia o sfiducia tra gli utenti.
+- I pesi vanno da -10 (massima sfiducia) a +10 (massima fiducia), con incrementi di 1.
+- Il timestamp indica il momento in cui la valutazione è stata effettuata
+
+Tutte le spiegazioni sucessive sono state applicate per ognuno dei dataset per produrre un confronto tra le reti.
+
+## Caricamento dei dati
+Dopo aver caricato le librerie necessarie (igraph, ggraph, ggplot2, dplyr, etc.), vengono importati i due dataset relativi alle reti Bitcoin OTC e Bitcoin Alpha.
+Questi file contengono informazioni sui collegamenti tra utenti e vengono successivamente elaborati per costruire i grafi corrispondenti.
+Sono state gestite eventuali incongruenze nei dati e sono stati selezionati solo gli attributi rilevanti per la costruzione della rete.
+
+## Creazione del Grafo
+I dati vengono trasformati in oggetti igraph, mantenendo la struttura diretta e pesata della rete.
+
+## Analisi della Struttura della Rete
+Una delle prime analisi eseguite riguarda la distribuzione dei gradi in ingresso e in uscita per comprendere il livello di connettività della rete.
+Si osservano le seguenti misure:
+
+- *Centralità di grado *(in-degree e out-degree) per identificare utenti influenti.
+- *Betweenness* per trovare nodi che fungono da ponti tra diverse parti della rete.
+- *Closeness* per quantificare la vicinanza media di un nodo agli altri nella rete.
+- *PageRank* per valutare l'importanza di un nodo in base alla rete connessa.
+
+Alcune misure di centralita' sono state calcolate solo a scopo di test non avendo senso nella rete analizzata. Ad esempio la betweenness di un nodo e' poco importante considerando che le transazioni vengono direttamente senza intermediari.
+### Domande chiave
+1. Quali nodi sono i piu' valutati all'interno della rete?
+  Rete Alpha: 1-3-2-4 con una differenza di ben 147 voti tra il primo e il terzo
+  Rete OTC:35-2642-1810 con una differenza di ben 224 voti tra il primo e il terzo
+2. Quali nodi danno piu' valutazioni all'interno della rete?
+  Rete Alpha: 1-8-3-4 dove prima il numero 8 non era nemmeno tra i primi 10, il numero 2 scende al 9 posto.
+  Rete OTC: 35-2642-1810 con una differenza di ben 359 voti tra il primo e il terzo
+3. Quali sono i nodi piu' influenti (pagerank)?
+  Rete Alpha: 1-3-4-2 switch tra posizione 4 e 2. il primo nodo avendo molti nodi in ingresso ha un valore molto alto
+  Rete OTC: 35-2642-1810 con una differenza sostanziale tra il primo e il terzo
+  
+## Visualizzazione della Distribuzione dei Gradi
+Per rappresentare graficamente l'andamento della distribuzione dei gradi nel tempo, viene utilizzata la libreria ggplot2 e la funzione personalizzata plot_distributione_gradi.
+Questa funzione consente di visualizzare la distribuzione dei gradi in una scala logaritmica per meglio evidenziare la coda della distribuzione.
+La distribuzione dei gradi segue un **andamento a coda lunga**, suggerendo che pochi nodi abbiano molte connessioni, mentre la maggior parte ha poche valutazioni.
+
+### Domande chiave
+4. Come varia la distribuzione dei gradi in entrata e uscita per le due reti?
+  La distribuzione dei gradi per entrambe le reti presenta una coda lunga, sia per i nodi in ingresso che in uscita. Si osserva    che i nodi con grado basso sono più numerosi in ingresso su entrambe le reti. Un aspetto interessante emerge dall'analisi dei    valori di sintesi (summary): le medie dei gradi in ingresso e in uscita risultano uguali, nonostante le differenze nei valori    minimi e massimi. Questo suggerisce un possibile bilanciamento nascosto, che si manifesta in entrambe le reti.
+5. La distribuzione dei gradi segue una legge di potenza?
+  Si e' analizzato se la distribuzione dei gradi segue una legge di potenza tramite la stima del valore di alpha e l'adeguamento   ai modelli di distribuzione Poisson, normale e power-law, al fine di determinare quale distribuzione sia la migliore. E'         stata usata la libreria powerLaw.
+  La distribuzione dei gradi per entrambe le reti, alpha e otc, è meglio rappresentata da una legge di potenza, sebbene le code    delle distribuzioni inizino a discostarsene. È stato trovato un valore di alpha pari a 2,22 per la rete Bitcoin Alpha e 2,12     per la rete Bitcoin OTC, con valori compresi tra 2 e 3. Confermiamo la presenza di hub, ovvero utenti con molte connessioni.     Non si tratta certamente di una rete casuale, poiché la distribuzione dei gradi non segue una legge di Poisson.
+6.Esistono utenti che ricevono molti giudizi negativi (utenti molto sfidati dalla rete)?
+  Sappiamo che esistono utenti con valutazioni negative, come mostrato nell'istogramma all'inizio dell'analisi.
+  Nella rete Alpha, ci sono 1536 archi con valutazioni negative su un totale di 24.186 nodi, pari al ~6,35%.
+  Nella rete OTC, ci sono 3.563 archi con valutazioni negative su un totale di 35.592 nodi, pari al ~10%.
+  Gli utenti con il maggior numero di valutazioni negative in Bitcoin Alpha sono:
+  - 7604 con 69 valutazioni negative
+  - 177 con 42 valutazioni negative
+  - 7603 con 41 valutazioni negative
+  Gli utenti con il maggior numero di valutazioni negative in Bitcoin OTC sono:
+  - 3744 con 75 valutazioni negative
+  - 1383 con 45 valutazioni negative
+  - 2028 con 45 valutazioni negative
+  La coda delle distribuzioni delle valutazioni negative è lunga, il che significa che pochi utenti ricevono la maggior parte     delle sfiducie.
+7.Quali sono i nodi che danno valutazioni piu' negative in termini di quantita' e di occorrenza?
+I nodi che assegnano il maggior numero di recensioni negative nella rete Alpha sono:
+- Nodo 8: 136 recensioni date e 0 ricevute
+- Nodo 5342: 52 recensioni date e 6 ricevute
+- Nodo 15: 45 recensioni date e 10 ricevute
+Considerando la somma dei pesi negativi assegnati nel grafo, il podio dei nodi con i pesi negativi più alti è il seguente:
+| Nodo | Pesi Negativi Dati |
+|------|---------------------|
+| 5    | -397                |
+| 7    | -320                |
+| 5342 | -297                |
+| 8    | -271                |
+Da ciò emerge che, nel caso del nodo 8, alcuni nodi assegnano recensioni negative ma con valori non elevati. Per analizzare meglio l'intensità delle recensioni, calcoliamo la media dei pesi negativi assegnati da ogni nodo. Questo permette di evitare che i nodi che assegnano tanti voti negativi (anche se solo di -1) abbiano un peso maggiore rispetto a chi assegna recensioni più pesanti.
+Le medie per i 4 nodi più attivi nella rete Alpha sono:
+| Nodo | Media Pesi Negativi |
+|------|----------------------|
+| 5    | -9.022727            |
+| 7    | -8.000000            |
+| 5342 | -5.711538            |
+| 8    | -1.992647            |
+I nodi che assegnano il maggior numero di recensioni negative nella rete OTC sono:
+- Nodo 2125: 227 recensioni date
+- Nodo 1810: 160 recensioni date
+- Nodo 2266: 98 recensioni date
+Considerando la somma dei pesi negativi assegnati nel grafo, il podio dei nodi con i pesi negativi più alti è il seguente:
+| Nodo | Pesi Negativi Dati |
+|------|---------------------|
+| 1810 | -1403               |
+| 2125 | -1243               |
+| 2067 | -668                |
+| 2266 | -604                |
+Le medie per i 4 nodi più attivi nella rete OTC sono:
+| Nodo | Media Pesi Negativi |
+|------|----------------------|
+| 1810 | -8.76875             |
+| 2125 | -5.475771            |
+| 2067 | -8.564103            |
+| 2266 | -6.163265            |
+8. gli utenti sfidati sono anche quelli che danno più giudizi negativi?
+  Si e' calcolato la correlazione tra la severità e il numero di valutazioni ricevute.
+  Con valori di correlazione pari a 0,16 e 0,22, possiamo concludere che non esiste una correlazione significativa, se non        minima. Ciò implica che chi riceve voti negativi non è necessariamente lo stesso che li assegna.
+9.Poiché la correlazione è bassa, ci si potrebbe chiedere se le valutazioni negative siano mirate o casuali.
+  Le valutazioni non sono casuali, ma mirate, poiché osservando il grafico si nota che solo pochi utenti ricevono un numero       elevato di voti negativi, e la distribuzione risulta essere fortemente sbilanciata.
+
+
+##Animazione della Distribuzione Temporale
+
+Utilizzando gganimate, viene creata un'animazione che mostra come evolve la distribuzione dei gradi nel tempo.
+Si selezionano finestre temporali di 15 giorni per analizzare come varia la struttura della rete nel tempo, permettendo di individuare possibili pattern di comportamento degli utenti.
+
+### Domande chiave
+10. Come varia la distribuzione dei gradi nel tempo?
+  Visualizzare la gif prodotta.
+  
+## Bilanciamento
+Trasformiamo il grafo in un grafo INDIRETTO pk la libreria non supporta i grafi diretti e verrebbe meno la considerazione del bilanciamento in casi come x amico di y ma y non amico di x. Di seguito la considerazione sul peso per l'arco indiretto:
+$$
+  peso\_aggregato=\frac{peso(x→y)+peso(y→x)}{2}
+$$
+PRO:
+È il metodo più semplice e trasparente.
+CONTRO:
+Potrebbe non catturare bene la dinamica di fiducia/sfiducia, soprattutto se il nodo che non riceve il reverse edge è sistematicamente in una posizione particolare (ad esempio, se è un nodo isolato o se ha un bilanciamento negativo complessivo).
+
+Come secondo approccio usiamo il seguente, piu' robusto per le reti non completamente connesse e dirette:
+Il grado di bilanciamento (o "balance index") di un nodo *i* in modo che rifletta la differenza tra il flusso (cioè, la somma dei pesi) in entrata e in uscita, normalizzata per tener conto delle dimensioni diverse dei nodi.
+La formula è:
+$$
+  Bnorm_i = \frac{Fin(i) - Fout(i)}{|Fin(i)|+|Fout(i)|}
+$$
+dove
+- Fin(i) è la somma dei pesi degli archi in entrata (escludendo eventuali self-loop) diviso il numero di archi in entrata,
+- Fout è la somma dei pesi degli archi in uscita (escludendo eventuali self-loop), diviso il numero di archi in uscita.
+Questa metrica restituisce un valore compreso tra -1 e 1.
+Se Bnorm(i) è positivo, il nodo riceve più “flusso” (valutazioni) positivo a quello che invia, suggerendo una posizione "positiva" (più fiducia in entrata).
+Se è negativo, il nodo invia più valutazioni (o flusso negativo) negative quindi tenedera' a dare valutazioni negative.
+Se è zero, significa che l’insieme dei pesi in entrata e uscita è bilanciato.
+
+### Domande chiave
+11. La rete e' bilanciata?
+  Entrambe le reti risultano bilanciate di molto circa 84%. Questo considerando il grafo indiretto con media dei pesi             normalizzati tra -1 e +1.
+11.a Quali comunità nelle reti Bitcoin Alpha e Bitcoin OTC mostrano il maggior disaccordo interno nelle valutazioni di fiducia??
+  Rete Alpha:
+  1	1.0000000, 2	0.9759288, 3	0.9876543,4	0.9633431,5	0.9919028,6	0.7923875,7	0.9781167,8	0.9642857,9	0.9637681,10	1.0000000	
+  Rete OTC:
+  1	0.9580550,2	0.9846311,3	1.0,4	0.9529694,5	0.9801136,6	0.9797898	,7	0.7272727	,8	0.9069359	,9	0.2131439	,10	1.0	
+  La maggior parte delle comunità ha un bilanciamento superiore a 0.90, suggerendo che le valutazioni interne sono molto          omogenee.
+  Tuttavia, la comunità 9 presenta un bilanciamento molto basso (0.2131), il che indica una forte eterogeneità nelle              valutazioni. Questo potrebbe riflettere un gruppo di utenti con opinioni discordanti o una combinazione di utenti fidati e      sfidati all'interno della stessa comunità.
+  
+## Similarita' ed eterogeneita'
+In una rete diretta, possiamo distinguere due concetti di similarità: in entrata e in uscita. Utilizziamo due metriche per misurarle:
+- Jaccard, che si basa sui vicini comuni tra due utenti.
+- Coseno, che si basa sui pesi degli archi (ovvero sulla somiglianza dei voti dati).
+Abbiamo calcolato la similarità di Jaccard nei primi 1000 nodi della rete a causa dell'elevato costo computazionale.
+
+### Domande chiave:
+12. Quali nodi valutano gli stessi utenti?
+  Alpha: I nodi 4  e 2 hanno similarita' di jaccard maggiore pari a 0.1884058 con 65 amici in comune.
+  OTC: I nodi 7  e 1 hanno similarita' di jaccard maggiore pari a  0.1888298 con 71 amici in comune.
+13. Esistono utenti con pattern di comportamento simili (ad esempio, che valutano altri utenti in modo simile)?
+  Per quanto riguarda la similarità del coseno, la coppia di nodi 8 e 3 ha una similarità di 0,83, che si colloca al secondo      posto rispetto a Jaccard (0,57). Ciò significa che i nodi 8 e 3 valutano in modo simile, ma si tratta di utenti diversi, dato   che il valore di Jaccard è solo 0,33.
+  In OTC La coppia di nodi 3 e 6, invece, raggiunge un valore di 0,91.
+14. Quanto varia la diversità delle connessioni tra i nodi nella rete? Esistono nodi con un comportamento eterogeneo?
+  In entrambe le reti (Bitcoin Alpha e Bitcoin OTC), alcuni nodi mostrano un'elevata eterogeneità nelle connessioni, suggerendo   che interagiscono con una varietà molto ampia di utenti.
+  Il nodo 798 nella rete Alpha e il nodo 135 nella rete OTC hanno i valori molto alti di eterogeneità di Shannon, indicando una   distribuzione molto diversificata delle loro connessioni rispettivamente 17.77238 e  19.9398.Questo indica che gli utenti       nella rete OTC hanno una maggiore varietà di interazioni rispetto alla rete Alpha dovuta alla dimenione della rete maggiore.
+  Per la metrica di Simpson, il valore massimo nella rete Alpha è sempre associato al nodo 798 (0.9954466), mentre nella rete     OTC il nodo con il valore massimo è 35.
+
+## Rilevamento delle comunita
+E' stato usato il metodo di Louvain per il rilevamento delle comunità in reti complesse come Bitcoin Alpha e OTC, poiché combina efficacia, scalabilità e solidità teorica, fornendo risultati interpretabili e significativi.
+Sucessivamente si e' usato l'algoritmo label propagation senza risultati soddisfacenti.
+Con li metodo label propagation si ottengono i seguenti esiti troppo sottoperformanti:
+Rete Alpha: Performa molto male rispetto a louvian, groups: 50, mod: 0.12
+Rete otc: Performa malissimo meno rispetto a louvian, groups: 71, mod: 0.052
+
+### Domande chiave
+15. Esistono gruppi di utenti che si fidano o sfidano reciprocamente?
+  Rete Alpha: 21 gruppi con mod: 0.47
+  Rete OTC:23, mod: 0.49
+  Da questi valori notiamo come l'algoritmo ha individuato comunità abbastanza ben definite, ma non estremamente separate. In     generale, una modularità superiore a 0.3-0.4 è considerata significativa, mentre valori sopra 0.6-0.7 indicano comunità molto   forti e ben separate.Il fatto che i valori siano vicini a 0.5 suggerisce che esistono gruppi di utenti fortemente connessi tra   loro, ma che rimangono comunque legati al resto della rete.
+  Il numero simile di comunità suggerisce che entrambe le reti presentano una struttura modulare comparabile.
+16. Quali sono le comunita' di grandezza maggiore?
+  Rete alpha omunita' in ordine di grandezza: 2 con 654 nodi, 4	497	nodi,5	581 nodi
+  Rete otc omunita' in ordine di grandezza: 2 con 1135 nodi, 4	1002	nodi, 1	915 nodi
+17. Quali comunita' sono piu' legate fra loro e quelle meno legate?
+  Le comunita' che sono piu' fiduciose tra loro sono tra la 8 e la 7 con 5 di valutazione (media dei pesi archi uscenti)
+  Le comunita' che sono meno fiduciose tra loro  con -9 di valutazione sono: (1	14,2	20,5	20,6	12,13 4	,13 5)		
+  Rete otc:
+  Le comunita' che sono piu' fiduciose tra loro sono tra la 9 e la 10 con 6 di valutazione
+  Le comunita' che sono meno fiduciose tra loro sono 17 (molte rispetto ad Alpha) e sono le seguenti: (1	13,7	6,7	21,9	7,10	12,10	16,11	9,14	3	,14	9	,16	1)	
+18. Esistono nodi con un comportamento intermediario tra gruppi (es. nodi con alta betweenness)?
+  Commenti Alpha:
+  La centralita' piu' alta e' del nodo 1 della comunita' 1 con bet 2132894, gradi in entrata 398 e 490 in uscita.
+  Il secondo migliore e' il nodo 2 della comunita' 5 	con grao entrata 205, uscita 195 e bet:	893043.9	
+  Il terzo migliore e' il nodo 11 della comunita' 2	con grao entrata 203, uscita 203 e bet:	726200.6	
+  Commenti OTC:
+  La centralita' piu' alta e' del nodo 35 della comunita' 3 con bet 4912540, gradi in entrata 535 e 763 in uscita.
+  Il secondo migliore e' il nodo 2642 della comunita' 8 	con grao entrata 412, uscita 406 e bet:	2150220		
+  Il terzo migliore e' il nodo 905 della comunita' 1	con grao entrata 264, uscita 264 e bet:	1664216
+  Il nodo più centrale in OTC ha un valore di betweenness più del doppio rispetto al nodo più centrale in Alpha (4.9M vs 2.1M),   indicando che nella rete OTC alcuni nodi svolgono un ruolo ancora più critico come intermediari tra le comunità.
+
+## Reti piccolo mondo
+Anche se non ha molto senso guardare se la rete e' a piccolo mondo calcoliamo lo stesso il diametro e la lunghezza media dei cammini geodetici.
+Se Bitcoin Alpha fosse una rete piccolo mondo, significherebbe che tra due utenti qualsiasi ci sono pochi intermediari.
+Questo potrebbe facilitare la diffusione della fiducia tra utenti che non hanno interagito direttamente, influenzando i comportamenti e le connessioni future.
+Anche se Bitcoin Alpha è decentralizzato, alcuni utenti possono ricevere molte valutazioni e diventare punti di riferimento per la fiducia, avvicinando indirettamente altri utenti tra loro.
+Possiamo far finta di non sapere un indirizzo a cui eseguire la transazione e quindi chiediamo a qualcun altro di passare la transazione a un suo conoscente fino a farla arrivare a destinazione.
+
+### Domande chiave
+19. Le reti sono a piccolo mondo?
+  Diametro alpha:  10  diametro otc:  11, Media percorsi geodetici alpha:  3.678864  Media percorsi geodetici otc:  3.718913
+  Sono piccolo mondo con diametro molto simile sebbene dimensione otc molto piu' grande rispetto a alpha. Questo perche'          all'aumentare dei nodi la distanza cresce di log(n).
+20. Come varia invece nelle comunita' piu' grandi se prese separatamente?
+  Per la comunita' 2 con 654 nodi di alpha abbiamo:
+  Diametro alpha comunita 2 :  85  media geodetica:  32.24518
+  Per la comunita' 5 con 1135 nodi di OTC abbiamo:
+  Diametro otc comunita 2 :  173  media geodetica:   51.49518
+  La rete completa mostra proprietà di piccolo mondo, ma le singole comunità più grandi no.
+  La presenza di hub nella rete globale probabilmente riduce le distanze, mentre le comunità interne sono meno efficienti nel     collegare i loro membri.
+21. Quanto è reciproca la fiducia tra gli utenti nelle reti Bitcoin Alpha e Bitcoin OTC?
+  Per alpha abbiamo una reciprocita' pari a 0.8320516, per OTC 0.7923129. L'alta reciprocità osservata in entrambe le reti        indica che la maggior parte delle relazioni di fiducia tra gli utenti è bidirezionale. In altre parole, se un utente esprime    una valutazione di fiducia (positiva o negativa) verso un altro, è molto probabile che quest'ultimo ricambi con una             valutazione propria.
+  Questa tendenza suggerisce una forte interazione tra gli utenti e potrebbe riflettere un meccanismo sociale in cui la fiducia   (o la sfiducia) viene generalmente ricambiata.
+
+## Conclusioni
+L'analisi ha permesso di identificare utenti chiave nelle reti sia per le valutazioni positive che negative, di coloro che si potrebbero considerare delgi hub e di coloro che risiedono in comunita' separate dal resto della rete permettendo di comprendere la dinamica delle connessioni di fiducia.
+L'uso di visualizzazioni dinamiche ha aiutato a evidenziare variazioni nella rete, fornendo una rappresentazione più intuitiva dell'evoluzione del sistema.
+
+Le informazioni estratte possono essere utili per comprendere il comportamento degli utenti e per sviluppare strategie di regolamentazione e sicurezza nella rete Bitcoin.
+
