@@ -13,7 +13,7 @@ L'analisi presentata in questo documento si concentra su due reti di fiducia leg
 
 Il nostro obiettivo è esplorare la struttura di queste reti attraverso misure di centralità, distribuzioni di grado e visualizzazioni dinamiche per comprendere meglio il comportamento degli utenti.
 
-Questo studio analizza la rete Bitcoin Alpha e OTC utilizzando dati transazionali per estrarre informazioni strutturali sulla connettività tra gli utenti. L'obiettivo principale è comprendere le proprietà della rete, il comportamento degli utenti e le possibili implicazioni economiche.
+Questo studio analizza la rete Bitcoin Alpha e OTC utilizzando i dati per estrarre informazioni strutturali sulla connettività tra gli utenti. L'obiettivo principale è comprendere le proprietà della rete, il comportamento degli utenti e le possibili implicazioni economiche.
 
 L'analisi si basa su un dataset di transazioni, trattato come un grafo diretto, in cui i nodi rappresentano gli utenti e gli archi rappresentano le transazioni effettuate tra di essi. La ponderazione degli archi dipende dalla quantità di Bitcoin trasferita.
 
